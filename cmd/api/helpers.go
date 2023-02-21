@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 )
 
@@ -33,7 +32,6 @@ func (app *Config) writeJSON(w http.ResponseWriter, status int, data any, header
 	out, err := json.Marshal(data)
 
 	if err != nil {
-		log.Println(33, err)
 		return err
 	}
 
@@ -49,7 +47,6 @@ func (app *Config) writeJSON(w http.ResponseWriter, status int, data any, header
 	_, err = w.Write(out)
 
 	if err != nil {
-		log.Println(33, err)
 		return err
 	}
 
