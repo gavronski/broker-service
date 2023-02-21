@@ -17,7 +17,7 @@ type Config struct {
 }
 
 type Note struct {
-	ID              int       `json:"note_id"`
+	ID              int       `json:"note_id,string,omitempty"`
 	Name            string    `json:"name"`
 	Description     string    `json:"description"`
 	TextColor       string    `json:"text_color"`
@@ -45,6 +45,7 @@ func main() {
 		Handler: app.routes(),
 	}
 
+	// run server
 	err = srv.ListenAndServe()
 
 	if err != nil {
@@ -60,6 +61,7 @@ func connect() (*amqp.Connection, error) {
 	for {
 		// create new connection
 		conn, err := amqp.Dial("amqp://guest:guest@rabbitmq")
+		fmt.Println("Try to connecto to rabbitmq...")
 
 		if err != nil {
 			fmt.Println("RabbitMQ not yet ready")
@@ -67,6 +69,7 @@ func connect() (*amqp.Connection, error) {
 		} else {
 			// if connection is ready break the loop
 			connection = conn
+			log.Println("Successfully connected to rabbitmq")
 			break
 		}
 
