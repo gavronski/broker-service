@@ -24,15 +24,17 @@ func (p *Producer) setup() error {
 
 // Push adds events to RabbitMQ
 func (p *Producer) Push(event string, severity string) error {
+	// open channel for bulking of messages
 	channel, err := p.connection.Channel()
 
 	if err != nil {
 		return err
 	}
 
+	// close channel
 	defer channel.Close()
-	log.Println("Push to channel")
 
+	// sends message to the RabbitMq
 	err = channel.Publish(
 		"notes_topic",
 		severity,
@@ -47,10 +49,11 @@ func (p *Producer) Push(event string, severity string) error {
 	if err != nil {
 		return err
 	}
-
+	log.Println(err)
 	return nil
 }
 
+// NewProducer sets up a producer.
 func NewProducer(conn *amqp.Connection) (Producer, error) {
 	producer := Producer{
 		connection: conn,
