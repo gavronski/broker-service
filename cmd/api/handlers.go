@@ -5,17 +5,19 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
+	"net/rpc"
 )
 
 type ReqPayload struct {
 	Action string `json:"action,omitempty"`
 	Name   string `json:"name,omitempty"`
-	NoteID string `json:"note_id,omitempty"`
+	NoteID int    `json:"note_id,string,omitempty"`
 	Data   Note   `json:"data,omitempty"`
 }
 
+// HandleSubmission is the main point of entry into the broker. It accepts a JSON
+// payload and performs an action based on the value of "action" in that JSON.
 func (app *Config) HandleSubmission(w http.ResponseWriter, r *http.Request) {
 	var reqPayload ReqPayload
 	err := app.readJSON(w, r, &reqPayload)
@@ -25,30 +27,27 @@ func (app *Config) HandleSubmission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// send payload to the notes service
 	app.ConnectToNotesService(w, reqPayload)
 }
 
+// ConnectToNotesService base on action from the payload calls propper function
 func (app *Config) ConnectToNotesService(w http.ResponseWriter, reqPayload ReqPayload) {
 	switch reqPayload.Action {
 	case "get-notes-list":
-		app.getNotesList(w)
+		// app.getNotesList(w)
+		app.getNotesViaRPC(w, reqPayload)
 	case "get-note-by-id":
-		app.getNoteByID(w, reqPayload)
-		reqPayload.Name = "add"
-		var note Note = Note{
-			Name:            "test",
-			Description:     "test descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest descriptiontest description",
-			TextColor:       "#FDF6F2",
-			BackgroundColor: "#EE8044",
-		}
-
-		reqPayload.Data = note
+		// app.getNoteByID(w, reqPayload)
+		app.getNotesViaRPC(w, reqPayload)
+	case "add-note", "update-note", "delete-note":
 		app.sendEvent(w, reqPayload)
 	default:
 		app.errorJSON(w, errors.New("unknown action"))
 	}
 }
 
+// getNotesList sends request to the notes-service and returns list of notes in JSON format
 func (app *Config) getNotesList(w http.ResponseWriter) {
 	request, err := http.NewRequest("GET", "http://notes-service", nil)
 
@@ -70,12 +69,15 @@ func (app *Config) getNotesList(w http.ResponseWriter) {
 
 	defer response.Body.Close()
 
+	// make sure the status is accepted
 	if response.StatusCode != http.StatusAccepted {
 		app.errorJSON(w, errors.New("error calling notes service"))
 		return
 	}
 
 	var jsonFromNotesService jsonResponse
+
+	// read response from the notes-service
 	err = json.NewDecoder(response.Body).Decode(&jsonFromNotesService)
 
 	if err != nil {
@@ -86,6 +88,7 @@ func (app *Config) getNotesList(w http.ResponseWriter) {
 	app.writeJSON(w, http.StatusAccepted, jsonFromNotesService)
 }
 
+// getNoteByID sends request to the notes-service and returns note's data by given id in JSON format
 func (app *Config) getNoteByID(w http.ResponseWriter, reqPayload ReqPayload) {
 	jsonData, _ := json.Marshal(reqPayload)
 	request, err := http.NewRequest("POST", "http://notes-service/get-note-by-id", bytes.NewBuffer(jsonData))
@@ -120,41 +123,79 @@ func (app *Config) getNoteByID(w http.ResponseWriter, reqPayload ReqPayload) {
 
 	app.writeJSON(w, http.StatusAccepted, jsonFromNotesService)
 }
+
+// sendEvent handles methods that modify data.
+// Sends events with Notes payload to RabbitMQ, then listner-sevice take the payload from RabiitMQ,
+// and following payload's action sends request to the notes'service.
 func (app *Config) sendEvent(w http.ResponseWriter, payload ReqPayload) {
-	err := app.pushToQueue(payload, "test")
+	err := app.pushToQueue(payload, "note-info")
 	if err != nil {
-		log.Println(125, err)
 		app.errorJSON(w, err)
 		return
 	}
-	log.Println("poszło")
-	var response jsonResponse
-	response.Error = false
-	response.Message = "ok"
-	// app.writeJSON(w, http.StatusAccepted, response)
+
+	var payloadResponse jsonResponse
+
+	payloadResponse.Error = false
+	payloadResponse.Message = "Operation's been successfully accomplished."
+
+	app.writeJSON(w, http.StatusAccepted, payloadResponse)
 }
 
+// pushToQueue publishes events to RabbitMQ.
 func (app *Config) pushToQueue(payload ReqPayload, msg string) error {
 
+	// create producer
 	producer, err := event.NewProducer(app.Rabbit)
 
 	if err != nil {
-		log.Println(140, err)
 		return err
 	}
 
-	// payload := ReqPayload{
-	// 	Name: name,
-	// 	Data: msg,
-	// }
-
 	jsonData, _ := json.Marshal(&payload)
-	err = producer.Push(string(jsonData), "add")
+	err = producer.Push(string(jsonData), "note-message")
 
 	if err != nil {
-		log.Println(153, err)
 		return err
 	}
 
 	return nil
+}
+
+type RPCPayload struct {
+	Action string
+	ID     int
+}
+
+// getNotesViaRPC creates client and invokes action from RPCServer.
+// Handles methods that getting data.
+func (app *Config) getNotesViaRPC(w http.ResponseWriter, requestPayload ReqPayload) {
+	// connect to the RPCServer
+	client, err := rpc.Dial("tcp", "notes-service:5001")
+	if err != nil {
+		return
+	}
+
+	rpcPayload := RPCPayload{
+		Action: requestPayload.Action,
+		ID:     requestPayload.Data.ID,
+	}
+
+	var responseString string
+	var response jsonResponse
+	err = client.Call("RPCServer.ReadAction", rpcPayload, &responseString)
+
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	err = json.Unmarshal([]byte(responseString), &response)
+
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	app.writeJSON(w, http.StatusAccepted, response)
 }
