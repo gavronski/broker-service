@@ -2,11 +2,17 @@ package main
 
 import (
 	"broker-service/event"
+	"broker-service/notes"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/rpc"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type ReqPayload struct {
@@ -198,4 +204,49 @@ func (app *Config) getNotesViaRPC(w http.ResponseWriter, requestPayload ReqPaylo
 	}
 
 	app.writeJSON(w, http.StatusAccepted, response)
+}
+
+func (app *Config) getNoteByIDViaGRPC(w http.ResponseWriter, r *http.Request) {
+	var reqPayload ReqPayload
+
+	err := app.readJSON(w, r, &reqPayload)
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	// create a grpc client connection
+	conn, err := grpc.Dial("notes-service:50001", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+	defer conn.Close()
+
+	c := notes.NewNoteServiceClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	var grpcResp *notes.NoteResponse
+
+	grpcResp, err = c.GetNotes(ctx, &notes.NoteRequest{
+		Payload: &notes.Payload{
+			Id: int32(reqPayload.Data.ID),
+		},
+	})
+
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	var note Note = Note{
+		ID:              int(grpcResp.Note.Id),
+		Name:            grpcResp.Note.Name,
+		Description:     grpcResp.Note.Description,
+		TextColor:       grpcResp.Note.TextColor,
+		BackgroundColor: grpcResp.Note.BackgroundColor,
+	}
+
+	var jsonResponse jsonResponse
+	jsonResponse.Data = note
+	jsonResponse.Error = false
+
+	app.writeJSON(w, http.StatusAccepted, jsonResponse)
 }
