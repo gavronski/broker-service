@@ -27,5 +27,7 @@ func (app *Config) routes() http.Handler {
 	// handle all request
 	mux.Post("/handle", app.HandleSubmission)
 
+	// grpc handler
+	mux.Post("/note-grpc", app.getNoteByIDViaGRPC)
 	return mux
 }
