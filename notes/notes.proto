@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package notes;
+
+option go_package = "/notes";
+
+message Payload {
+  int32 id = 1;
+}
+
+message Note {
+  int32 id = 1;
+  string name = 2;
+  string description = 3;
+  string text_color = 4;
+  string background_color = 5;
+}
+
+message NoteRequest {
+  Payload payload = 1;
+}
+
+message NoteResponse {
+ Note note = 1;
+}
+
+service NoteService {
+    rpc GetNotes(NoteRequest) returns (NoteResponse);
+}
